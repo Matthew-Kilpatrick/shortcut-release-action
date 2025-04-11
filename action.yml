@@ -1,0 +1,157 @@
+name: 'Shortcut Release'
+description: 'Automatically create GitHub releases based on Shortcut stories referenced in commit messages'
+
+author: 'Matthew Kilpatrick'
+
+inputs:
+  github-token:
+    description: 'GitHub token for authentication'
+    required: true
+    default: '${{ github.token }}'
+  shortcut-token:
+    description: 'Shortcut API token'
+    required: true
+  body-prefix:
+    description: 'Optional text to prepend to the generated release notes'
+    required: false
+    default: ''
+  title:
+    description: 'Optional custom release title. If empty, uses the version as title'
+    required: false
+    default: ''
+  artifacts:
+    description: 'Optional comma-separated list of artifacts to upload with the release'
+    required: false
+    default: ''
+  draft:
+    description: 'Whether to create the release as a draft'
+    required: false
+    default: false
+  prerelease:
+    description: 'Whether to mark the release as a prerelease'
+    required: false
+    default: false
+  create-release:
+    description: 'Whether to automatically create the GitHub release. If false, only generates version and release notes'
+    required: false
+    default: true
+  debug:
+    description: 'Whether to enable debug mode for additional logging'
+    required: false
+    default: false
+
+outputs:
+  version:
+    description: 'The version of the new release'
+    value: ${{ steps.release_info.outputs.version }}
+  release-notes:
+    description: 'The generated release notes'
+    value: ${{ steps.release_info.outputs.release-notes }}
+
+runs:
+  using: 'composite'
+  steps:
+    # To avoid fetch-depth: 0 which could be problematic for large repositories, we'll lookup the latest version tag and only fetch changes between these, as that's all we need
+    - name: Get latest version tag
+      id: get_tag
+      shell: bash
+      run: |
+        ${{ inputs.debug && 'set -exo pipefail' || '' }}
+        git fetch --tags
+        # First check if current commit has a tag
+        CURRENT_TAG=$(git tag --points-at HEAD 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+        
+        if [ -n "$CURRENT_TAG" ]; then
+          echo "Current commit already has version tag: $CURRENT_TAG"
+          # Find the latest tag before this one
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | grep -B 1 "$CURRENT_TAG" | head -n 1)
+          if [ "$LATEST_TAG" = "$CURRENT_TAG" ]; then
+            # If the current tag is the only one, we'll use v0.0.0 as the base
+            LATEST_TAG=""
+          fi
+        else
+          # No tag at current commit, find the latest tag
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | head -n 1)
+        fi
+        
+        if [ -z "$LATEST_TAG" ]; then
+          echo "No version tags found, will fetch all changes"
+          echo "latest_tag=" >> $GITHUB_OUTPUT
+        else
+          echo "Found latest tag: $LATEST_TAG"
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Fetch changes since last tag
+      shell: bash
+      run: |
+        ${{ inputs.debug && 'set -exo pipefail' || '' }}
+        if [ -n "${{ steps.get_tag.outputs.latest_tag }}" ]; then
+          echo "Fetching changes since tag: ${{ steps.get_tag.outputs.latest_tag }}"
+          # Get the timestamp of the last release
+          LAST_RELEASE_TIME=$(git log -1 --format=%aI ${{ steps.get_tag.outputs.latest_tag }})
+          echo "Last release was at: $LAST_RELEASE_TIME"
+          # Fetch commits since that time
+          git fetch --shallow-since="$LAST_RELEASE_TIME" origin HEAD
+          # Show what we have
+          echo "Current commits:"
+          git log --oneline ${{ steps.get_tag.outputs.latest_tag }}..HEAD
+        else
+          echo "No previous tag found, fetching HEAD"
+          git fetch origin HEAD
+        fi
+
+    - name: Cache Python virtual environment
+      id: cache-venv
+      uses: actions/cache@v3
+      with:
+        path: ${{ github.action_path }}/.venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          venv-${{ runner.os }}-
+
+    - name: Set up Python and install dependencies
+      id: python_setup
+      working-directory: ${{ github.action_path }}
+      shell: bash
+      run: |
+        ${{ inputs.debug && 'set -exo pipefail' || '' }}
+        if [ ! -d ".venv" ]; then
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
+        else
+          source .venv/bin/activate
+        fi
+
+    - name: Generate Release Info
+      id: release_info
+      working-directory: ${{ github.action_path }}
+      shell: bash
+      env:
+        SHORTCUT_API_TOKEN: ${{ inputs.shortcut-token }}
+      run: |
+        ${{ inputs.debug && 'set -exo pipefail' || '' }}
+        source .venv/bin/activate
+        python release_handler.py --prev-version="${{ steps.get_tag.outputs.latest_tag || 'v0.0.0' }}" --repo-path="${{ github.workspace }}" > release_info.json
+        echo "version=$(jq -r '.tag' release_info.json)" >> $GITHUB_OUTPUT
+        echo "release-notes<<EOF" >> $GITHUB_OUTPUT
+        jq -r '.release_notes' release_info.json >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub release
+      id: create_release
+      if: ${{ inputs.create-release }}
+      uses: ncipollo/release-action@v1
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        tag: ${{ steps.release_info.outputs.version }}
+        name: ${{ !inputs.title && inputs.title || steps.release_info.outputs.version }}
+        body: |
+          ${{ inputs.body-prefix }}
+          ${{ steps.release_info.outputs.release-notes }}
+        allowUpdates: true
+        draft: ${{ inputs.draft }}
+        prerelease: ${{ inputs.prerelease }}
+        artifacts: ${{ inputs.artifacts }}
