@@ -64,14 +64,14 @@ runs:
         if [ -n "$CURRENT_TAG" ]; then
           echo "Current commit already has version tag: $CURRENT_TAG"
           # Find the latest tag before this one
-          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | grep -B 1 "$CURRENT_TAG" | head -n 1)
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -Vr | grep -B 1 "$CURRENT_TAG" | head -n 1)
           if [ "$LATEST_TAG" = "$CURRENT_TAG" ]; then
             # If the current tag is the only one, we'll use v0.0.0 as the base
             LATEST_TAG=""
           fi
         else
           # No tag at current commit, find the latest tag
-          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | head -n 1)
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -Vr | head -n 1)
         fi
         
         if [ -z "$LATEST_TAG" ]; then
