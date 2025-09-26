@@ -108,24 +108,38 @@ class ReleaseHandler:
             return 'patch'
         return 'patch'
 
-    def generate_release_notes(self, categories: Dict[str, List[Dict]]) -> str:
-        """Generate release notes from categorized stories."""
+    def generate_release_notes(self, categories: Dict[str, List[Dict]], include_story_links: bool = False) -> str:
+        """Generate release notes from categorized stories.
+        
+        Args:
+            categories: Dictionary of categorized stories
+            include_story_links: If True, will include markdown links to the stories. Defaults to False.
+        """
         notes = []
         
         if categories['feature']:
             notes.append("## 🚀 Features")
             for story in categories['feature']:
-                notes.append(f"- {story['name']} ({story['id']})")
+                if include_story_links:
+                    notes.append(f"- [{story['name']}](https://app.shortcut.com/story/{story['id'].lower()})")
+                else:
+                    notes.append(f"- {story['name']}")
         
         if categories['bug']:
             notes.append("\n## 🐛 Bug Fixes")
             for story in categories['bug']:
-                notes.append(f"- {story['name']} ({story['id']})")
+                if include_story_links:
+                    notes.append(f"- [{story['name']}](https://app.shortcut.com/story/{story['id'].lower()})")
+                else:
+                    notes.append(f"- {story['name']}")
         
         if categories['chore']:
             notes.append("\n## 🔧 Chores")
             for story in categories['chore']:
-                notes.append(f"- {story['name']} ({story['id']})")
+                if include_story_links:
+                    notes.append(f"- [{story['name']}](https://app.shortcut.com/story/{story['id'].lower()})")
+                else:
+                    notes.append(f"- {story['name']}")
         
         return "\n".join(notes)
 
@@ -159,6 +173,7 @@ def main():
         parser = argparse.ArgumentParser(description='Generate release information')
         parser.add_argument('--prev-version', required=True, help='Previous version tag (e.g., v1.2.3)')
         parser.add_argument('--repo-path', help='Optional repository path')
+        parser.add_argument('--include-story-links', action='store_true', help='Include Shortcut story links in release notes')
         args = parser.parse_args()
 
         handler = ReleaseHandler()
@@ -196,7 +211,7 @@ def main():
             logger.info(f"New version: v{new_version} (bump type: {bump_type})")
         
         # Generate release notes
-        release_notes = handler.generate_release_notes(categories)
+        release_notes = handler.generate_release_notes(categories, include_story_links=args.include_story_links)
         logger.info(f"Generated release notes: {release_notes}")
         
         # Output tag and release notes in a format that can be used by GitHub Actions
@@ -212,4 +227,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()

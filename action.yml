@@ -39,6 +39,10 @@ inputs:
     description: 'Whether to enable debug mode for additional logging'
     required: false
     default: false
+  include-story-links:
+    description: 'Whether to include Shortcut story links in release notes'
+    required: false
+    default: false
 
 outputs:
   version:
@@ -133,7 +137,7 @@ runs:
       run: |
         ${{ inputs.debug && 'set -exo pipefail' || '' }}
         source .venv/bin/activate
-        python release_handler.py --prev-version="${{ steps.get_tag.outputs.latest_tag || 'v0.0.0' }}" --repo-path="${{ github.workspace }}" > release_info.json
+        python release_handler.py --prev-version="${{ steps.get_tag.outputs.latest_tag || 'v0.0.0' }}" --repo-path="${{ github.workspace }}" ${{ inputs.include-story-links == 'true' && '--include-story-links' || '' }} > release_info.json
         echo "version=$(jq -r '.tag' release_info.json)" >> $GITHUB_OUTPUT
         echo "release-notes<<EOF" >> $GITHUB_OUTPUT
         jq -r '.release_notes' release_info.json >> $GITHUB_OUTPUT
